@@ -10,41 +10,39 @@ app = Flask(__name__)
 # ==========================================
 
 YOUTUBE_STREAMS = {
-    "media_one": "https://www.youtube.com/watch?v=-8d8-c0yvyU",
-
-    # Test stream
-    "lofi": "https://www.youtube.com/watch?v=jfKfPfyJRdk"
+    "media_one": "https://www.youtube.com/@mediaoneTVlive/live",
+    "lofi": "https://www.youtube.com/@LofiGirl/live",
+    "nasa": "https://www.youtube.com/@NASA/live"
 }
 
 # ==========================================
-# ENVIRONMENT VARIABLES
+# ENV VARIABLES
 # ==========================================
 
-# Set in Koyeb Secrets:
-# PROXY_URL=http://username:password@host:port
+PROXY = os.getenv("PROXY_URL", "").strip()
 
-PROXY = os.getenv("PROXY_URL", "")
-
-# Optional custom cookies path
 COOKIES_FILE = os.getenv(
     "COOKIES_FILE",
     "/mnt/data/cookies.txt"
 )
 
+print("===================================")
+print("PROXY RAW =", repr(PROXY))
+print("COOKIES =", COOKIES_FILE)
+print("===================================")
+
 # ==========================================
-# FFMPEG SETTINGS
+# FFMPEG
 # ==========================================
 
 FFMPEG_CMD = [
     "ffmpeg",
-
-    "-loglevel", "info",
+    "-loglevel", "error",
 
     "-i", "pipe:0",
 
     "-vn",
 
-    # low bandwidth
     "-ac", "1",
     "-ar", "22050",
     "-b:a", "40k",
@@ -55,7 +53,7 @@ FFMPEG_CMD = [
 
 
 # ==========================================
-# REALTIME LOGGING
+# LOGGING
 # ==========================================
 
 def log_output(pipe, prefix):
@@ -70,29 +68,28 @@ def log_output(pipe, prefix):
 
 
 # ==========================================
-# STREAM GENERATOR
+# STREAM
 # ==========================================
 
 def generate_stream(url):
 
     ytdlp_cmd = [
-
         "yt-dlp",
 
-        # verbose logs
         "-v",
 
-        # best audio
-        "-f", "251/bestaudio/best",
+        "-f",
+        "bestaudio/best",
 
-        # stdout output
-        "-o", "-",
+        "-o",
+        "-",
 
         "--no-warnings",
 
-        # better YouTube compatibility
         "--extractor-args",
-        "youtube:player_client=tv_embedded,web"
+        "youtube:player_client=tv_embedded,web",
+
+        "--live-from-start"
     ]
 
     # ==========================================
@@ -101,7 +98,7 @@ def generate_stream(url):
 
     if os.path.exists(COOKIES_FILE):
 
-        print(f"[SYSTEM] Using cookies: {COOKIES_FILE}")
+        print("[SYSTEM] Using cookies")
 
         ytdlp_cmd += [
             "--cookies",
@@ -116,7 +113,7 @@ def generate_stream(url):
     # PROXY
     # ==========================================
 
-    if PROXY.strip():
+    if PROXY:
 
         print("[SYSTEM] Proxy ENABLED")
 
@@ -135,12 +132,12 @@ def generate_stream(url):
 
     ytdlp_cmd.append(url)
 
+    print("[SYSTEM] Starting yt-dlp")
+    print(" ".join(ytdlp_cmd))
+
     # ==========================================
     # START YT-DLP
     # ==========================================
-
-    print("[SYSTEM] Starting yt-dlp...")
-    print(" ".join(ytdlp_cmd))
 
     ytdlp = subprocess.Popen(
         ytdlp_cmd,
@@ -158,9 +155,6 @@ def generate_stream(url):
     # ==========================================
     # START FFMPEG
     # ==========================================
-
-    print("[SYSTEM] Starting ffmpeg...")
-    print(" ".join(FFMPEG_CMD))
 
     ffmpeg = subprocess.Popen(
         FFMPEG_CMD,
@@ -194,14 +188,10 @@ def generate_stream(url):
 
         except Exception as e:
 
-            print(f"[ERROR] {e}")
+            print("[SYSTEM ERROR]", e)
             break
 
-    # ==========================================
-    # CLEANUP
-    # ==========================================
-
-    print("[SYSTEM] Cleaning up processes")
+    print("[SYSTEM] Cleaning up")
 
     try:
         ytdlp.kill()
@@ -215,7 +205,7 @@ def generate_stream(url):
 
 
 # ==========================================
-# HOME PAGE
+# HOME
 # ==========================================
 
 @app.route("/")
@@ -226,48 +216,44 @@ def home():
 
     <head>
 
-        <title>YouTube Audio Streams</title>
+    <title>YouTube Audio Streams</title>
 
-        <style>
+    <style>
 
-            body {
-                background: #111;
-                color: white;
-                font-family: Arial;
-                padding: 20px;
-            }
+    body{
+        background:#111;
+        color:white;
+        font-family:Arial;
+        padding:20px;
+    }
 
-            h1 {
-                color: #00ff99;
-            }
+    a{
+        color:#00ccff;
+        font-size:20px;
+        text-decoration:none;
+    }
 
-            a {
-                color: #00ccff;
-                text-decoration: none;
-                font-size: 20px;
-            }
+    li{
+        margin:15px 0;
+    }
 
-            li {
-                margin: 14px 0;
-            }
-
-        </style>
+    </style>
 
     </head>
 
     <body>
 
-        <h1>Available Channels</h1>
+    <h1>Available Streams</h1>
 
-        <ul>
+    <ul>
     """
 
     for name in YOUTUBE_STREAMS:
 
-        html += f'<li>🎧 <a href="/{name}">{name}</a></li>'
+        html += f'<li><a href="/{name}">{name}</a></li>'
 
     html += """
-        </ul>
+    </ul>
 
     </body>
     </html>
@@ -277,64 +263,55 @@ def home():
 
 
 # ==========================================
-# COOKIES DEBUG
+# NODE CHECK
 # ==========================================
 
-@app.route("/cookies")
-def cookies_check():
-
-    if not os.path.exists(COOKIES_FILE):
-        return "cookies.txt NOT FOUND"
+@app.route("/node")
+def node_check():
 
     try:
 
-        with open(
-            COOKIES_FILE,
-            "r",
-            encoding="utf-8",
-            errors="ignore"
-        ) as f:
+        version = subprocess.check_output(
+            ["node", "-v"]
+        ).decode().strip()
 
-            first_lines = "".join(f.readlines()[:20])
-
-        return f"<pre>{first_lines}</pre>"
+        return f"NODE OK: {version}"
 
     except Exception as e:
-        return str(e)
+
+        return f"NODE FAILED: {e}"
 
 
 # ==========================================
-# HEALTH CHECK
+# HEALTH
 # ==========================================
 
 @app.route("/health")
 def health():
 
     return {
-        "status": "running",
-        "proxy_enabled": bool(PROXY.strip()),
+        "status": "ok",
+        "proxy_enabled": bool(PROXY),
         "cookies_exists": os.path.exists(COOKIES_FILE),
         "channels": list(YOUTUBE_STREAMS.keys())
     }
 
 
 # ==========================================
-# STREAM ENDPOINT
+# STREAM ROUTE
 # ==========================================
 
 @app.route("/<channel>")
 def stream(channel):
 
-    print(f"[SYSTEM] Incoming request: {channel}")
+    print("[SYSTEM] Incoming request:", channel)
 
     url = YOUTUBE_STREAMS.get(channel)
 
     if not url:
-
-        print("[ERROR] Channel not found")
         return "Channel not found", 404
 
-    print(f"[SYSTEM] Streaming URL: {url}")
+    print("[SYSTEM] Streaming URL:", url)
 
     return Response(
         generate_stream(url),
@@ -343,15 +320,13 @@ def stream(channel):
 
 
 # ==========================================
-# SERVER START
+# MAIN
 # ==========================================
 
 if __name__ == "__main__":
 
-    print("[SYSTEM] Server starting on port 8000")
-
     app.run(
         host="0.0.0.0",
-        port=8000,
+        port=int(os.environ.get("PORT", 8000)),
         threaded=True
     )
