@@ -1,13 +1,13 @@
 FROM python:3.11-slim
 
-# Install ffmpeg + nodejs
 RUN apt-get update && \
     apt-get install -y \
     ffmpeg \
     nodejs \
-    npm && \
-    node -v && \
-    npm -v
+    npm
+
+RUN node -v
+RUN npm -v
 
 WORKDIR /app
 
