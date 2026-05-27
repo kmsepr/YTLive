@@ -1,4 +1,3 @@
-flask
-requests
+Flask
+gunicorn
 yt-dlp
-jinja2
