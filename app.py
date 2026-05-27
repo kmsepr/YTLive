@@ -1,500 +1,244 @@
-from flask import Flask, Response
+import os
 import subprocess
 import threading
-import os
-import traceback
-from datetime import datetime
+from flask import Flask, Response
 
 app = Flask(__name__)
 
 # =========================================================
-# CHANNELS
+# CONFIG
 # =========================================================
 
-YOUTUBE_STREAMS = {
+COOKIES_FILE = "/mnt/data/cookies.txt"
+
+# TEST FIRST WITHOUT PROXY
+PROXY = None
+
+# Example:
+# PROXY = "http://user:pass@ip:port"
+
+STREAMS = {
     "media_one": "https://www.youtube.com/@mediaoneTVlive/live",
-    "lofi": "https://www.youtube.com/@LofiGirl/live",
-    "nasa": "https://www.youtube.com/@NASA/live"
 }
 
 # =========================================================
-# ENVIRONMENT VARIABLES
+# LOGGING
 # =========================================================
 
-PROXY = os.getenv("PROXY_URL", "").strip()
-
-COOKIES_FILE = os.getenv(
-    "COOKIES_FILE",
-    "/mnt/data/cookies.txt"
-)
+def log(prefix, message):
+    print(f"[{prefix}] {message}", flush=True)
 
 # =========================================================
-# STARTUP LOGS
-# =========================================================
-
-print("\n========================================")
-print("YOUTUBE AUDIO STREAM SERVER STARTING")
-print("========================================")
-
-print(f"[BOOT] Time: {datetime.now()}")
-
-print(f"[BOOT] PROXY RAW = {repr(PROXY)}")
-
-print(f"[BOOT] COOKIES FILE = {COOKIES_FILE}")
-
-print(f"[BOOT] COOKIES EXISTS = {os.path.exists(COOKIES_FILE)}")
-
-print("========================================\n")
-
-# =========================================================
-# FFMPEG SETTINGS
-# =========================================================
-
-FFMPEG_CMD = [
-    "ffmpeg",
-
-    "-loglevel", "info",
-
-    "-i", "pipe:0",
-
-    "-vn",
-
-    "-ac", "1",
-    "-ar", "22050",
-    "-b:a", "40k",
-
-    "-f", "mp3",
-    "-"
-]
-
-# =========================================================
-# LOGGING THREAD
-# =========================================================
-
-def log_output(pipe, prefix):
-
-    try:
-
-        for line in iter(pipe.readline, b''):
-
-            if not line:
-                break
-
-            try:
-
-                decoded = line.decode(
-                    errors="ignore"
-                ).rstrip()
-
-                print(f"[{prefix}] {decoded}")
-
-            except Exception as e:
-
-                print(f"[LOG ERROR] {e}")
-
-    except Exception as e:
-
-        print(f"[THREAD ERROR] {prefix}: {e}")
-
-
-# =========================================================
-# STREAM GENERATOR
+# STREAM FUNCTION
 # =========================================================
 
 def generate_stream(url):
 
-    print("\n================================================")
-    print("[SYSTEM] NEW STREAM SESSION")
-    print("================================================")
+    log("SYSTEM", "=" * 50)
+    log("SYSTEM", "NEW STREAM SESSION")
+    log("SYSTEM", "=" * 50)
 
-    print(f"[SYSTEM] URL = {url}")
+    log("SYSTEM", f"URL = {url}")
+    log("SYSTEM", f"Using cookies = {COOKIES_FILE}")
+    log("SYSTEM", f"Proxy enabled = {bool(PROXY)}")
 
     # =====================================================
-    # BUILD YT-DLP COMMAND
+    # yt-dlp command
+    # IMPORTANT:
+    # Using ANDROID client only
+    # NO web client
     # =====================================================
 
-    ytdlp_cmd = [
-
+    yt_cmd = [
         "yt-dlp",
-
         "-v",
-
-        "-f",
-        "bestaudio/best",
-
-        "-o",
-        "-",
-
+        "-f", "bestaudio/best",
+        "-o", "-",
         "--no-warnings",
-
+        "--live-from-start",
         "--extractor-args",
-        "youtube:player_client=tv_embedded,web",
-
-        "--live-from-start"
+        "youtube:player_client=android",
+        "--cookies", COOKIES_FILE,
+        url
     ]
 
-    # =====================================================
-    # COOKIES
-    # =====================================================
-
-    if os.path.exists(COOKIES_FILE):
-
-        print(f"[SYSTEM] Using cookies: {COOKIES_FILE}")
-
-        ytdlp_cmd += [
-            "--cookies",
-            COOKIES_FILE
-        ]
-
-    else:
-
-        print("[SYSTEM] cookies.txt NOT FOUND")
-
-    # =====================================================
-    # PROXY
-    # =====================================================
-
     if PROXY:
-
-        print("[SYSTEM] Proxy ENABLED")
-
-        print(f"[SYSTEM] Proxy = {PROXY}")
-
-        ytdlp_cmd += [
-            "--proxy",
-            PROXY
-        ]
-
-    else:
-
-        print("[SYSTEM] Proxy DISABLED")
+        yt_cmd.extend(["--proxy", PROXY])
 
     # =====================================================
-    # ADD URL
+    # ffmpeg command
     # =====================================================
 
-    ytdlp_cmd.append(url)
+    ffmpeg_cmd = [
+        "ffmpeg",
+        "-loglevel", "info",
+
+        "-reconnect", "1",
+        "-reconnect_streamed", "1",
+        "-reconnect_delay_max", "5",
+
+        "-i", "pipe:0",
+
+        "-vn",
+
+        "-ac", "1",
+        "-ar", "22050",
+        "-b:a", "40k",
+
+        "-f", "mp3",
+        "-"
+    ]
+
+    log("SYSTEM", "yt-dlp COMMAND:")
+    log("SYSTEM", " ".join(yt_cmd))
+
+    log("SYSTEM", "")
+    log("SYSTEM", "ffmpeg COMMAND:")
+    log("SYSTEM", " ".join(ffmpeg_cmd))
 
     # =====================================================
-    # PRINT FULL COMMAND
+    # START yt-dlp
     # =====================================================
 
-    print("\n[SYSTEM] yt-dlp COMMAND:")
-    print(" ".join(ytdlp_cmd))
+    log("SYSTEM", "")
+    log("SYSTEM", "Starting yt-dlp...")
 
-    print("\n[SYSTEM] ffmpeg COMMAND:")
-    print(" ".join(FFMPEG_CMD))
+    yt_process = subprocess.Popen(
+        yt_cmd,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        bufsize=0
+    )
 
-    # =====================================================
-    # START YT-DLP
-    # =====================================================
-
-    print("\n[SYSTEM] Starting yt-dlp...")
-
-    try:
-
-        ytdlp = subprocess.Popen(
-            ytdlp_cmd,
-            stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE,
-            bufsize=0
-        )
-
-        print(f"[SYSTEM] yt-dlp PID = {ytdlp.pid}")
-
-    except Exception as e:
-
-        print("[SYSTEM] FAILED TO START yt-dlp")
-        print(e)
-
-        traceback.print_exc()
-
-        return
+    log("SYSTEM", f"yt-dlp PID = {yt_process.pid}")
 
     # =====================================================
-    # START YT-DLP LOG THREAD
+    # START ffmpeg
     # =====================================================
 
-    threading.Thread(
-        target=log_output,
-        args=(ytdlp.stderr, "YT-DLP"),
-        daemon=True
-    ).start()
+    log("SYSTEM", "")
+    log("SYSTEM", "Starting ffmpeg...")
+
+    ffmpeg_process = subprocess.Popen(
+        ffmpeg_cmd,
+        stdin=yt_process.stdout,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        bufsize=0
+    )
+
+    log("SYSTEM", f"ffmpeg PID = {ffmpeg_process.pid}")
 
     # =====================================================
-    # START FFMPEG
+    # STDERR LOGGER
     # =====================================================
 
-    print("\n[SYSTEM] Starting ffmpeg...")
+    def log_yt():
+        for line in yt_process.stderr:
+            try:
+                log("YT-DLP", line.decode(errors="ignore").rstrip())
+            except:
+                pass
 
-    try:
+    def log_ffmpeg():
+        for line in ffmpeg_process.stderr:
+            try:
+                log("FFMPEG", line.decode(errors="ignore").rstrip())
+            except:
+                pass
 
-        ffmpeg = subprocess.Popen(
-            FFMPEG_CMD,
-            stdin=ytdlp.stdout,
-            stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE,
-            bufsize=0
-        )
-
-        print(f"[SYSTEM] ffmpeg PID = {ffmpeg.pid}")
-
-    except Exception as e:
-
-        print("[SYSTEM] FAILED TO START ffmpeg")
-        print(e)
-
-        traceback.print_exc()
-
-        try:
-            ytdlp.kill()
-        except:
-            pass
-
-        return
-
-    # =====================================================
-    # START FFMPEG LOG THREAD
-    # =====================================================
-
-    threading.Thread(
-        target=log_output,
-        args=(ffmpeg.stderr, "FFMPEG"),
-        daemon=True
-    ).start()
+    threading.Thread(target=log_yt, daemon=True).start()
+    threading.Thread(target=log_ffmpeg, daemon=True).start()
 
     # =====================================================
     # STREAM LOOP
     # =====================================================
 
-    print("\n[SYSTEM] STREAM LOOP STARTED")
+    log("SYSTEM", "")
+    log("SYSTEM", "STREAM LOOP STARTED")
 
-    total_bytes = 0
+    try:
+        while True:
 
-    while True:
+            chunk = ffmpeg_process.stdout.read(4096)
 
-        try:
-
-            data = ffmpeg.stdout.read(1024)
-
-            if not data:
-
-                print("\n[SYSTEM] NO MORE AUDIO DATA")
+            if not chunk:
+                log("SYSTEM", "NO MORE AUDIO DATA")
                 break
 
-            total_bytes += len(data)
+            yield chunk
 
-            if total_bytes % (1024 * 100) == 0:
-
-                print(
-                    f"[SYSTEM] Streamed {total_bytes} bytes"
-                )
-
-            yield data
-
-        except Exception as e:
-
-            print(f"\n[SYSTEM ERROR] {e}")
-
-            traceback.print_exc()
-
-            break
-
-    # =====================================================
-    # CLEANUP
-    # =====================================================
-
-    print("\n[SYSTEM] CLEANING UP PROCESSES")
-
-    try:
-
-        ytdlp.kill()
-
-        print("[SYSTEM] yt-dlp killed")
+    except GeneratorExit:
+        log("SYSTEM", "CLIENT DISCONNECTED")
 
     except Exception as e:
+        log("SYSTEM", f"STREAM ERROR = {e}")
 
-        print(f"[SYSTEM] yt-dlp cleanup error: {e}")
+    finally:
 
-    try:
+        log("SYSTEM", "")
+        log("SYSTEM", "CLEANING UP PROCESSES")
 
-        ffmpeg.kill()
+        try:
+            yt_process.kill()
+            log("SYSTEM", "yt-dlp killed")
+        except:
+            pass
 
-        print("[SYSTEM] ffmpeg killed")
+        try:
+            ffmpeg_process.kill()
+            log("SYSTEM", "ffmpeg killed")
+        except:
+            pass
 
-    except Exception as e:
-
-        print(f"[SYSTEM] ffmpeg cleanup error: {e}")
-
-    print("[SYSTEM] SESSION ENDED")
-    print("================================================\n")
-
+        log("SYSTEM", "SESSION ENDED")
+        log("SYSTEM", "=" * 50)
 
 # =========================================================
-# HOME PAGE
+# ROUTES
 # =========================================================
 
 @app.route("/")
 def home():
+    return "YouTube Audio Stream Server Running"
 
-    html = """
-    <html>
+@app.route("/<stream_name>")
+def stream(stream_name):
 
-    <head>
+    if stream_name not in STREAMS:
+        return "Stream not found", 404
 
-        <title>YouTube Audio Streams</title>
+    url = STREAMS[stream_name]
 
-        <style>
-
-            body {
-                background: #111;
-                color: white;
-                font-family: Arial;
-                padding: 20px;
-            }
-
-            h1 {
-                color: #00ff99;
-            }
-
-            a {
-                color: #00ccff;
-                text-decoration: none;
-                font-size: 20px;
-            }
-
-            li {
-                margin: 15px 0;
-            }
-
-            .ok {
-                color: #00ff99;
-            }
-
-            .bad {
-                color: red;
-            }
-
-        </style>
-
-    </head>
-
-    <body>
-
-        <h1>YouTube Audio Streams</h1>
-    """
-
-    if PROXY:
-
-        html += "<p class='ok'>Proxy ENABLED</p>"
-
-    else:
-
-        html += "<p class='bad'>Proxy DISABLED</p>"
-
-    if os.path.exists(COOKIES_FILE):
-
-        html += "<p class='ok'>cookies.txt FOUND</p>"
-
-    else:
-
-        html += "<p class='bad'>cookies.txt NOT FOUND</p>"
-
-    html += "<ul>"
-
-    for name in YOUTUBE_STREAMS:
-
-        html += f'<li>🎧 <a href="/{name}">{name}</a></li>'
-
-    html += """
-        </ul>
-
-        <hr>
-
-        <a href="/health">Health</a><br><br>
-
-        <a href="/node">Node Check</a>
-
-    </body>
-
-    </html>
-    """
-
-    return html
-
-
-# =========================================================
-# NODE CHECK
-# =========================================================
-
-@app.route("/node")
-def node_check():
-
-    try:
-
-        version = subprocess.check_output(
-            ["node", "-v"]
-        ).decode().strip()
-
-        return f"NODE OK: {version}"
-
-    except Exception as e:
-
-        return f"NODE FAILED: {e}"
-
-
-# =========================================================
-# HEALTH CHECK
-# =========================================================
-
-@app.route("/health")
-def health():
-
-    return {
-        "status": "running",
-        "proxy_enabled": bool(PROXY),
-        "proxy_value": PROXY,
-        "cookies_exists": os.path.exists(COOKIES_FILE),
-        "cookies_path": COOKIES_FILE,
-        "channels": list(YOUTUBE_STREAMS.keys())
-    }
-
-
-# =========================================================
-# STREAM ROUTE
-# =========================================================
-
-@app.route("/<channel>")
-def stream(channel):
-
-    print(f"\n[SYSTEM] Incoming request: {channel}")
-
-    url = YOUTUBE_STREAMS.get(channel)
-
-    if not url:
-
-        print("[SYSTEM] Channel NOT FOUND")
-
-        return "Channel not found", 404
-
-    print(f"[SYSTEM] Streaming URL: {url}")
+    log("SYSTEM", "")
+    log("SYSTEM", f"Incoming request: {stream_name}")
+    log("SYSTEM", f"Streaming URL: {url}")
 
     return Response(
         generate_stream(url),
         mimetype="audio/mpeg"
     )
 
-
 # =========================================================
-# MAIN
+# START
 # =========================================================
 
 if __name__ == "__main__":
 
-    print("[SYSTEM] Flask app starting")
+    print("")
+    print("=" * 40)
+    print("YOUTUBE AUDIO STREAM SERVER STARTING")
+    print("=" * 40)
+
+    print(f"[BOOT] COOKIES FILE = {COOKIES_FILE}")
+    print(f"[BOOT] COOKIES EXISTS = {os.path.exists(COOKIES_FILE)}")
+    print(f"[BOOT] PROXY = {PROXY}")
+
+    print("=" * 40)
+    print("")
 
     app.run(
         host="0.0.0.0",
-        port=int(os.environ.get("PORT", 8000)),
+        port=8000,
         threaded=True
     )
