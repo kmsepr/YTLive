@@ -5,55 +5,109 @@ import os
 
 app = Flask(__name__)
 
+# =========================
+# CHANNELS
+# =========================
+
 YOUTUBE_STREAMS = {
     "media_one": "https://www.youtube.com/watch?v=-8d8-c0yvyU"
 }
 
+# =========================
+# COOKIES
+# =========================
+
 COOKIES_FILE = "/mnt/data/cookies.txt"
+
+# =========================
+# FFMPEG SETTINGS
+# =========================
 
 FFMPEG_CMD = [
     "ffmpeg",
     "-loglevel", "info",
+
+    # input
     "-i", "pipe:0",
+
+    # audio only
     "-vn",
+
+    # low bandwidth settings
     "-ac", "1",
     "-ar", "22050",
     "-b:a", "40k",
+
+    # mp3 output
     "-f", "mp3",
     "-"
 ]
 
 
+# =========================
+# REALTIME LOGGING
+# =========================
+
 def log_output(pipe, prefix):
     """
     Print subprocess logs in realtime
     """
+
     for line in iter(pipe.readline, b''):
         try:
             print(f"[{prefix}] {line.decode(errors='ignore').rstrip()}")
-        except:
-            pass
+        except Exception as e:
+            print(f"[LOG ERROR] {e}")
 
+
+# =========================
+# STREAM GENERATOR
+# =========================
 
 def generate_stream(url):
 
     ytdlp_cmd = [
         "yt-dlp",
+
+        # verbose logs
         "-v",
-        "-f", "bestaudio",
+
+        # better livestream audio selection
+        "-f", "251/bestaudio/best",
+
+        # output to stdout
         "-o", "-",
+
+        # fewer warnings
         "--no-warnings",
-        "--live-from-start"
+
+        # use WEB client instead of android
+        "--extractor-args",
+        "youtube:player_client=web",
     ]
 
-    # Add cookies if available
+    # =========================
+    # COOKIES
+    # =========================
+
     if os.path.exists(COOKIES_FILE):
+
         print(f"[SYSTEM] Using cookies: {COOKIES_FILE}")
-        ytdlp_cmd += ["--cookies", COOKIES_FILE]
+
+        ytdlp_cmd += [
+            "--cookies",
+            COOKIES_FILE
+        ]
+
     else:
         print("[SYSTEM] cookies.txt not found")
 
+    # add url
     ytdlp_cmd.append(url)
+
+    # =========================
+    # START YT-DLP
+    # =========================
 
     print("[SYSTEM] Starting yt-dlp...")
     print(" ".join(ytdlp_cmd))
@@ -70,6 +124,10 @@ def generate_stream(url):
         args=(ytdlp.stderr, "YT-DLP"),
         daemon=True
     ).start()
+
+    # =========================
+    # START FFMPEG
+    # =========================
 
     print("[SYSTEM] Starting ffmpeg...")
     print(" ".join(FFMPEG_CMD))
@@ -88,8 +146,14 @@ def generate_stream(url):
         daemon=True
     ).start()
 
+    # =========================
+    # STREAM LOOP
+    # =========================
+
     while True:
+
         try:
+
             data = ffmpeg.stdout.read(1024)
 
             if not data:
@@ -101,6 +165,10 @@ def generate_stream(url):
         except Exception as e:
             print(f"[ERROR] {e}")
             break
+
+    # =========================
+    # CLEANUP
+    # =========================
 
     print("[SYSTEM] Cleaning up processes")
 
@@ -115,6 +183,10 @@ def generate_stream(url):
         pass
 
 
+# =========================
+# HOME PAGE
+# =========================
+
 @app.route("/")
 def home():
 
@@ -122,15 +194,43 @@ def home():
     <html>
     <head>
         <title>YouTube Audio Streams</title>
-    </head>
-    <body style="background:#111;color:white;font-family:Arial;padding:20px;">
 
-        <h1>YouTube Audio Streams</h1>
+        <style>
+
+            body {
+                background: #111;
+                color: white;
+                font-family: Arial;
+                padding: 20px;
+            }
+
+            h1 {
+                color: #00ff99;
+            }
+
+            a {
+                color: #00ccff;
+                text-decoration: none;
+                font-size: 20px;
+            }
+
+            li {
+                margin: 14px 0;
+            }
+
+        </style>
+
+    </head>
+
+    <body>
+
+        <h1>Available Channels</h1>
+
         <ul>
     """
 
     for name in YOUTUBE_STREAMS:
-        html += f'<li><a style="color:#00ccff;" href="/{name}">{name}</a></li>'
+        html += f'<li>🎧 <a href="/{name}">{name}</a></li>'
 
     html += """
         </ul>
@@ -141,6 +241,37 @@ def home():
 
     return html
 
+
+# =========================
+# COOKIES DEBUG
+# =========================
+
+@app.route("/cookies")
+def cookies_check():
+
+    if not os.path.exists(COOKIES_FILE):
+        return "cookies.txt NOT FOUND"
+
+    try:
+
+        with open(
+            COOKIES_FILE,
+            "r",
+            encoding="utf-8",
+            errors="ignore"
+        ) as f:
+
+            first_lines = "".join(f.readlines()[:20])
+
+        return f"<pre>{first_lines}</pre>"
+
+    except Exception as e:
+        return str(e)
+
+
+# =========================
+# STREAM ENDPOINT
+# =========================
 
 @app.route("/<channel>")
 def stream(channel):
@@ -160,6 +291,10 @@ def stream(channel):
         mimetype="audio/mpeg"
     )
 
+
+# =========================
+# START SERVER
+# =========================
 
 if __name__ == "__main__":
 
